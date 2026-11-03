@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mimiq234</title>
+  <meta name="description" content="Mimiq234: the AI that only knows what you teach it.">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ccircle cx='50' cy='50' r='44' fill='%2305060f' stroke='%2322e4ff' stroke-width='6'/%3E%3Cpath d='M27 68 V34 L50 56 L73 34 V68' fill='none' stroke='%2322e4ff' stroke-width='9' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Exo+2:wght@400;500;600;700&family=Orbitron:wght@500;700;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-theme="cyan">
+  <div class="bg-grid" aria-hidden="true"></div>
+  <div class="bg-glow" aria-hidden="true"></div>
+
+  <!-- Sign in / Sign up -->
+  <main id="auth" class="auth" hidden>
+    <div class="auth-card glass">
+      <div class="brand big"><span class="brand-mark" data-logo></span><span class="brand-name">MIMIQ<b>234</b></span></div>
+      <p class="tagline">The AI that only knows what <em>you</em> teach it.</p>
+      <div class="auth-tabs">
+        <button class="auth-tab active" data-mode="signin" type="button">Sign in</button>
+        <button class="auth-tab" data-mode="signup" type="button">Sign up</button>
+      </div>
+      <form id="auth-form">
+        <label>Username
+          <input id="auth-user" name="username" autocomplete="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" title="3–20 letters, numbers or _">
+        </label>
+        <label>Password
+          <input id="auth-pass" name="password" type="password" autocomplete="current-password" required minlength="6">
+        </label>
+        <p id="auth-error" class="form-error" role="alert"></p>
+        <button class="btn primary wide" id="auth-submit" type="submit">Enter Mimiq234</button>
+      </form>
+      <ul class="auth-features">
+        <li>🧠 Teach a shared brain</li>
+        <li>🔒 Your own private bot</li>
+        <li>👥 A bot just for friends</li>
+        <li>🏆 Levels, streaks &amp; bounties</li>
+      </ul>
+    </div>
+  </main>
+
+  <!-- Main app -->
+  <div id="app" class="app" hidden>
+    <header class="topbar glass">
+      <div class="brand"><span class="brand-mark" data-logo></span><span class="brand-name">MIMIQ<b>234</b></span></div>
+      <div class="player">
+        <div class="level-chip" title="Your level and XP">
+          <span class="lv">LV <b id="me-level">1</b></span>
+          <div class="xpbar"><div id="me-xpfill"></div></div>
+          <span id="me-xp" class="xp-text">0 / 50 XP</span>
+        </div>
+        <div class="streak-chip" title="Daily streak: come back every day!">🔥 <b id="me-streak">0</b></div>
+        <span class="user-chip">@<span id="me-name"></span></span>
+        <button class="icon-btn" id="sound-btn" type="button" title="Sound on/off">🔊</button>
+        <button class="icon-btn" id="logout-btn" type="button" title="Sign out">⏻</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="chat-panel glass" id="chat-panel" data-bot="public">
+        <nav class="bot-tabs">
+          <button class="bot-tab active" data-bot="public" type="button"><span class="ico">🌐</span>Public</button>
+          <button class="bot-tab" data-bot="private" type="button"><span class="ico">🔒</span>Private</button>
+          <button class="bot-tab" data-bot="friend" type="button"><span class="ico">👥</span>Friends</button>
+        </nav>
+        <div class="bot-head">
+          <div class="bot-avatar" id="bot-avatar"></div>
+          <div class="bot-info">
+            <h2 id="bot-name">ECHO</h2>
+            <p id="bot-desc"></p>
+          </div>
+          <div class="bot-stats"><b id="bot-count">0</b><small>facts known</small></div>
+          <button class="btn small ghost" id="random-btn" type="button" title="Ask a random question someone taught">🎲 Random</button>
+        </div>
+        <div class="chats">
+          <div class="messages" data-bot="public" aria-live="polite"></div>
+          <div class="messages" data-bot="private" aria-live="polite" hidden></div>
+          <div class="messages" data-bot="friend" aria-live="polite" hidden></div>
+        </div>
+        <form class="composer" id="composer">
+          <input id="prompt" maxlength="300" autocomplete="off" placeholder="Ask the bot anything…">
+          <button class="btn primary" type="submit" id="send-btn">Send ➤</button>
+        </form>
+        <p class="hint">Fun commands: <code>/roll 2d6</code> <code>/flip</code> <code>/8ball</code> <code>/joke</code> <code>/stats</code></p>
+      </section>
+
+      <aside class="side glass">
+        <nav class="side-tabs">
+          <button data-side="bounties" class="active" type="button">🎯<span>Bounties</span></button>
+          <button data-side="ranks" type="button">🏆<span>Ranks</span></button>
+          <button data-side="friends" type="button">👥<span>Friends</span></button>
+          <button data-side="badges" type="button">🏅<span>Badges</span></button>
+          <button data-side="style" type="button">🎨<span>Style</span></button>
+        </nav>
+        <div class="side-body" id="side-body"></div>
+      </aside>
+    </div>
+  </div>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="modal" class="modal" hidden><div class="modal-card glass" id="modal-card"></div></div>
+  <canvas id="confetti" aria-hidden="true"></canvas>
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+  <script src="config.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -296,7 +296,10 @@ function applyMe() {
   $('#me-xp').textContent = `${user.xp} / ${user.levelNext} XP`;
   $('#me-xpfill').style.width = `${Math.min(100, ((user.xp - user.levelFloor) / (user.levelNext - user.levelFloor)) * 100)}%`;
   $('#sound-btn').textContent = user.sound ? '🔊' : '🔇';
-  $('#bot-avatar').innerHTML = AVATAR_SVG[user.avatar] || AVATAR_SVG.hex;
+  // Big avatar in the bot header and the small ones next to every bot message.
+  const avatar = AVATAR_SVG[user.avatar] || AVATAR_SVG.hex;
+  $('#bot-avatar').innerHTML = avatar;
+  $$('.mini-avatar').forEach(n => { n.innerHTML = avatar; });
   $('#bot-count').textContent = counts[state.bot];
   $('#admin-tab').hidden = !user.isAdmin;
 }

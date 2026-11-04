@@ -44,6 +44,8 @@ const state = {
   side: 'bounties',
   board: 'weekly',
   started: false,
+  // Lowercase usernames, used to pick the right button next to each @name.
+  social: { friends: new Set(), outgoing: new Set(), incoming: new Set() },
 };
 
 // ---------- small helpers ----------
@@ -180,6 +182,7 @@ function confetti() {
 
 // ---------- modal ----------
 function openModal(content) {
+  $('#modal-card').classList.remove('wide');
   $('#modal-card').replaceChildren(content);
   $('#modal').hidden = false;
 }
@@ -295,6 +298,67 @@ function applyMe() {
   $('#sound-btn').textContent = user.sound ? '🔊' : '🔇';
   $('#bot-avatar').innerHTML = AVATAR_SVG[user.avatar] || AVATAR_SVG.hex;
   $('#bot-count').textContent = counts[state.bot];
+  $('#admin-tab').hidden = !user.isAdmin;
+}
+
+// ---------- add friend from any @name ----------
+async function loadSocial() {
+  const data = await rpc('hive_friends');
+  const lower = names => new Set(names.map(n => n.toLowerCase()));
+  state.social = {
+    friends: lower(data.friends.map(f => f.username)),
+    outgoing: lower(data.outgoing),
+    incoming: lower(data.incoming.map(r => r.username)),
+  };
+  $('#friend-badge').textContent = data.incoming.length;
+  $('#friend-badge').hidden = !data.incoming.length;
+  $$('.user-tag').forEach(fillUserTag);
+  return data;
+}
+
+function friendStatus(username) {
+  const name = username.toLowerCase();
+  if (name === state.me.user.username.toLowerCase()) return 'me';
+  if (state.social.friends.has(name)) return 'friend';
+  if (state.social.outgoing.has(name)) return 'requested';
+  if (state.social.incoming.has(name)) return 'incoming';
+  return 'none';
+}
+
+// "@name" with an Add friend button. Used everywhere a username is shown.
+function userTag(username) {
+  const tag = el('span', { class: 'user-tag', 'data-name': username });
+  fillUserTag(tag);
+  return tag;
+}
+
+function fillUserTag(tag) {
+  const name = tag.dataset.name;
+  const add = label => el('button', {
+    class: `add-friend-btn ${label === '✓ Accept' ? 'hot' : ''}`, type: 'button', title: `Be friends with @${name}`,
+    onclick: e => { e.stopPropagation(); addFriendByName(name); },
+  }, label);
+  const extra = {
+    none: add('＋ Add friend'),
+    incoming: add('✓ Accept'),
+    requested: el('span', { class: 'friend-chip' }, '⏳ Requested'),
+    friend: el('span', { class: 'friend-chip ok' }, '👥'),
+    me: null,
+  }[friendStatus(name)];
+  tag.replaceChildren(...[`@${name}`, extra].filter(Boolean));
+}
+
+async function addFriendByName(username) {
+  try {
+    const res = await rpc('hive_add_friend_by_name', { p_username: username });
+    toast(res.status === 'friends' ? `🤝 You and @${res.friend} are now friends!` : `📨 Friend request sent to @${res.friend}`);
+    showEvents(res.events);
+    await loadSocial();
+    if (res.status === 'friends') await refreshMe();
+    if (state.side === 'friends') renderSide();
+  } catch (err) {
+    toast(err.message, 'error');
+  }
 }
 
 function showAuth() {
@@ -332,6 +396,7 @@ async function boot() {
   $('#auth').hidden = true;
   $('#app').hidden = false;
   applyMe();
+  await loadSocial().catch(err => toast(err.message, 'error'));
   for (const bot of Object.keys(BOTS)) {
     const box = chatBox(bot);
     if (!box.children.length) addBotMsg(bot, BOTS[bot].hello);
@@ -415,7 +480,7 @@ async function send(rawText) {
     const [res] = await Promise.all([rpc('hive_ask', { p_bot: bot, p_prompt: text }), sleep(400 + Math.random() * 400)]);
     typing.remove();
     if (res.type === 'answer') {
-      addAnswerMsg(bot, res.answer);
+      addAnswerMsg(bot, res.answer, res.corrected ? { note: `🔤 Looks like a typo, so I answered “${res.corrected}”` } : {});
       sfx('receive');
     } else if (res.type === 'unknown') {
       addUnknownMsg(bot, res.prompt, res);
@@ -462,13 +527,16 @@ function addAnswerMsg(bot, answer, opts = {}) {
 function renderAnswer(node) {
   const a = node._answer;
   const bubble = $('.bubble', node);
-  const meta = [`🦜 taught by @${a.author || 'someone'}`, `used ${a.uses}×`];
-  if (a.editor) meta.push(`✏️ edited by @${a.editor}`);
+  const meta = [
+    el('span', {}, '🦜 taught by ', a.author ? userTag(a.author) : 'someone'),
+    el('span', {}, `used ${a.uses}×`),
+  ];
+  if (a.editor) meta.push(el('span', {}, '✏️ edited by ', userTag(a.editor)));
   bubble.replaceChildren(...[
     node._note ? el('p', { class: 'note' }, node._note) : null,
     el('div', { class: 'answer-text' }, richText(a.text)),
     el('div', { class: 'answer-meta' },
-      meta.map(m => el('span', {}, m)),
+      meta,
       a.best ? el('span', { class: 'badge-best' }, '⭐ Top answer') : null),
     el('div', { class: 'answer-actions' },
       el('button', { class: `vote up ${a.myVote === 1 ? 'on' : ''}`, type: 'button', title: 'Good answer', onclick: () => castVote(node, 1) }, '👍', el('span', {}, a.up)),
@@ -562,7 +630,7 @@ async function openHistory(answer) {
       el('div', { class: 'hist current' }, el('span', { class: 'hist-label' }, 'Current answer'), richText(current.text)),
       history.length
         ? history.map(h => el('div', { class: 'hist' },
-          el('span', { class: 'hist-label' }, `Replaced by @${h.by} · ${timeAgo(h.at)}`),
+          el('span', { class: 'hist-label' }, 'Replaced by ', userTag(h.by), ` · ${timeAgo(h.at)}`),
           richText(h.text),
           el('div', {}, el('button', {
             class: 'btn small ghost', type: 'button',
@@ -604,7 +672,7 @@ function tipBanner(prompt, textarea) {
 }
 
 function teachBox({ prompt, initial = '', title, note, bounty, submitLabel, cancelLabel = 'Cancel', onSubmit, onCancel }) {
-  const textarea = el('textarea', { maxlength: 1000, placeholder: 'Type how the bot should reply…', rows: 3 });
+  const textarea = el('textarea', { maxlength: 1000, placeholder: 'Type how the bot should reply…', rows: 3, spellcheck: 'true' });
   textarea.value = initial;
   const error = el('div', { class: 'teach-error', role: 'alert' });
   const submit = el('button', { class: 'btn primary small', type: 'submit' }, submitLabel);
@@ -688,7 +756,9 @@ async function renderSide() {
   const body = $('#side-body');
   const panel = state.side;
   try {
-    const content = await ({ bounties: bountiesPanel, ranks: ranksPanel, friends: friendsPanel, badges: badgesPanel, style: stylePanel })[panel]();
+    const content = await ({
+      bounties: bountiesPanel, ranks: ranksPanel, friends: friendsPanel, badges: badgesPanel, style: stylePanel, admin: adminPanel,
+    })[panel]();
     if (state.side === panel) body.replaceChildren(content);
   } catch (err) {
     body.replaceChildren(el('p', { class: 'empty' }, `⚠️ ${err.message}`));
@@ -705,7 +775,18 @@ async function bountiesPanel() {
         el('div', { class: 'row-main' },
           el('span', { class: 'row-title' }, b.prompt),
           el('span', { class: 'row-sub' }, `asked ${b.asks}× ${b.mine ? '· you asked this one' : '· 🎯 2× XP'}`)),
-        el('button', { class: 'btn small', type: 'button', onclick: () => teachBounty(b) }, 'Teach'))))
+        el('button', { class: 'btn small', type: 'button', onclick: () => teachBounty(b) }, 'Teach'),
+        state.me.user.isAdmin ? el('button', {
+          class: 'btn small danger', type: 'button', title: 'Admin: remove this bounty',
+          onclick: async () => {
+            try {
+              await rpc('hive_admin_delete_bounty', { p_prompt: b.prompt });
+              renderSide();
+            } catch (err) {
+              toast(err.message, 'error');
+            }
+          },
+        }, '✕') : null)))
       : el('p', { class: 'empty' }, '🧠 No bounties! Mimiq knows everything people have asked… for now.'),
   );
 }
@@ -731,7 +812,7 @@ async function ranksPanel() {
       ? el('ul', { class: 'list' }, rows.map((r, i) => el('li', { class: `row ${r.me ? 'me' : ''}` },
         el('span', { class: 'rank' }, medal(i)),
         el('div', { class: 'row-main' },
-          el('span', { class: 'row-title' }, `@${r.username}${r.me ? ' (you)' : ''}`),
+          el('span', { class: 'row-title' }, r.me ? `@${r.username} (you)` : userTag(r.username)),
           el('span', { class: 'row-sub' }, `Level ${r.level}`)),
         el('span', { class: 'score' }, `${r.score} XP`))))
       : el('p', { class: 'empty' }, 'No XP earned this week yet. Grab the #1 spot!'),
@@ -739,8 +820,19 @@ async function ranksPanel() {
 }
 
 async function friendsPanel() {
-  const { friends } = await rpc('hive_friends');
+  const { friends, incoming, outgoing } = await loadSocial();
   const code = state.me.user.friendCode;
+  const answerRequest = async (from, accept) => {
+    try {
+      const res = await rpc('hive_answer_friend_request', { p_from: from.id, p_accept: accept });
+      toast(accept ? `🤝 You and @${from.username} are now friends!` : 'Request declined');
+      showEvents(res.events);
+      if (accept) await refreshMe();
+      renderSide();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
   const input = el('input', { placeholder: 'MIMIQ-XXXXX', maxlength: 13, 'aria-label': "Friend's code" });
   const form = el('form', { class: 'add-friend' }, input, el('button', { class: 'btn small', type: 'submit' }, 'Add'));
   form.addEventListener('submit', async e => {
@@ -750,6 +842,7 @@ async function friendsPanel() {
       toast(`🤝 You and @${res.friend} are now friends!`);
       showEvents(res.events);
       await refreshMe();
+      await loadSocial();
       renderSide();
     } catch (err) {
       toast(err.message, 'error');
@@ -763,8 +856,17 @@ async function friendsPanel() {
         class: 'btn small', type: 'button',
         onclick: () => navigator.clipboard?.writeText(code).then(() => toast('📋 Friend code copied!'), () => toast(code)),
       }, '📋 Copy code')),
+    incoming.length ? el('h3', {}, `FRIEND REQUESTS (${incoming.length})`) : null,
+    incoming.length ? el('ul', { class: 'list request-list' }, incoming.map(r => el('li', { class: 'row' },
+      el('div', { class: 'row-main' },
+        el('span', { class: 'row-title' }, `@${r.username}`),
+        el('span', { class: 'row-sub' }, `Level ${r.level} wants to be friends`)),
+      el('button', { class: 'btn small', type: 'button', onclick: () => answerRequest(r, true) }, '✓ Accept'),
+      el('button', { class: 'btn small ghost', type: 'button', onclick: () => answerRequest(r, false) }, '✕')))) : null,
     el('h3', {}, 'ADD A FRIEND'),
+    el('p', { class: 'side-intro' }, 'Type their friend code, or tap "＋ Add friend" next to anyone\'s @name.'),
     form,
+    outgoing.length ? el('p', { class: 'side-intro' }, `⏳ Waiting for: ${outgoing.map(n => `@${n}`).join(', ')}`) : null,
     el('h3', {}, `FRIENDS (${friends.length})`),
     friends.length
       ? el('ul', { class: 'list' }, friends.map(f => el('li', { class: 'row' },
@@ -777,6 +879,7 @@ async function friendsPanel() {
             if (!confirm(`Remove @${f.username} from your friends?`)) return;
             await rpc('hive_remove_friend', { p_friend: f.id }).catch(err => toast(err.message, 'error'));
             await refreshMe();
+            await loadSocial();
             renderSide();
           },
         }, '✕'))))
@@ -828,6 +931,138 @@ function stylePanel() {
       el('span', {}, user.sound ? '🔊 Sound effects on' : '🔇 Sound effects off'),
       el('button', { class: 'btn small', type: 'button', onclick: () => $('#sound-btn').click() }, user.sound ? 'Turn off' : 'Turn on')),
   );
+}
+
+// ---------- admin (only @Lucsis; the database checks this too) ----------
+async function adminPanel() {
+  const s = await rpc('hive_admin_stats');
+  const stat = (n, label) => el('div', { class: 'stat' }, el('b', {}, n), el('small', {}, label));
+  return el('div', {},
+    el('h3', {}, '🛡️ ADMIN'),
+    el('p', { class: 'side-intro' }, 'Only you can see this tab.'),
+    el('div', { class: 'stat-grid' },
+      stat(s.users, 'players'), stat(s.newUsers7d, 'new this week'), stat(s.activeToday, 'active today'), stat(s.banned, 'banned'),
+      stat(s.answers.public, 'public answers'), stat(s.answers.friend, 'friend answers'), stat(s.answers.private, 'private answers'), stat(s.votes, 'votes'),
+      stat(s.bounties, 'bounties'), stat(s.friendships, 'friendships'), stat(s.xpWeek, 'XP this week')),
+    el('div', { class: 'admin-actions' },
+      el('button', { class: 'btn wide', type: 'button', onclick: () => openAdmin('users') }, '👤 Manage accounts'),
+      el('button', { class: 'btn wide', type: 'button', onclick: () => openAdmin('answers') }, '💬 Manage answers')),
+    el('h3', {}, 'MOST USED ANSWERS'),
+    s.topAnswers.length
+      ? el('ul', { class: 'list' }, s.topAnswers.map(t => el('li', { class: 'row' },
+        el('div', { class: 'row-main' }, el('span', { class: 'row-title' }, t.prompt)),
+        el('span', { class: 'score' }, `${t.uses}×`))))
+      : el('p', { class: 'empty' }, 'Nothing has been taught yet.'),
+  );
+}
+
+function openAdmin(view) {
+  const search = el('input', {
+    type: 'search', 'aria-label': 'Search',
+    placeholder: view === 'users' ? 'Search usernames…' : 'Search questions or answers…',
+  });
+  const list = el('div', { class: 'admin-list' }, el('p', { class: 'empty' }, 'Loading…'));
+  const load = async () => {
+    try {
+      const rows = view === 'users' ? await adminUserRows(search.value.trim(), load) : await adminAnswerRows(search.value.trim());
+      list.replaceChildren(...rows);
+    } catch (err) {
+      list.replaceChildren(el('p', { class: 'empty' }, `⚠️ ${err.message}`));
+    }
+  };
+  let timer;
+  search.addEventListener('input', () => {
+    clearTimeout(timer);
+    timer = setTimeout(load, 300);
+  });
+  openModal(el('div', {},
+    el('div', { class: 'admin-head' },
+      el('h3', {}, view === 'users' ? '👤 Accounts' : '💬 Public & friend answers'),
+      el('button', { class: 'icon-btn', type: 'button', title: 'Close', onclick: closeModal }, '✕')),
+    search,
+    list));
+  $('#modal-card').classList.add('wide');
+  load();
+}
+
+async function adminUserRows(search, reload) {
+  const { users } = await rpc('hive_admin_users', { p_search: search });
+  if (!users.length) return [el('p', { class: 'empty' }, 'No players found.')];
+  const act = async (fn, args, message) => {
+    try {
+      await rpc(fn, args);
+      toast(message);
+      reload();
+    } catch (err) {
+      toast(err.message, 'error');
+    }
+  };
+  return users.map(u => el('div', { class: `admin-row ${u.banned ? 'banned' : ''}` },
+    el('div', { class: 'row-main' },
+      el('span', { class: 'row-title' }, `@${u.username}`, u.admin ? ' 🛡️ admin' : '', u.banned ? ' 🚫 banned' : ''),
+      el('span', { class: 'row-sub' }, `Level ${u.level} · ${u.xp} XP · 🔥 ${u.streak} · taught ${u.taught} · ${u.votesCast} votes · ${u.friends} friends`),
+      el('span', { class: 'row-sub' }, `Joined ${new Date(u.joined).toLocaleDateString()} · last active ${u.lastActive || 'never'}`)),
+    u.admin ? null : el('div', { class: 'admin-btns' },
+      el('button', {
+        class: 'btn small', type: 'button',
+        onclick: () => {
+          const xp = window.prompt(`Set XP for @${u.username}:`, u.xp);
+          if (xp !== null && /^\d+$/.test(xp.trim())) act('hive_admin_update_user', { p_user: u.id, p_xp: Number(xp) }, `✏️ @${u.username} now has ${Number(xp)} XP`);
+        },
+      }, 'Set XP'),
+      el('button', {
+        class: 'btn small', type: 'button',
+        onclick: () => act('hive_admin_update_user', { p_user: u.id, p_banned: !u.banned }, u.banned ? `✅ @${u.username} unbanned` : `🚫 @${u.username} banned`),
+      }, u.banned ? 'Unban' : 'Ban'),
+      el('button', {
+        class: 'btn small danger', type: 'button',
+        onclick: () => {
+          if (confirm(`Delete @${u.username} forever? This removes their account and everything they taught. It can't be undone.`)) {
+            act('hive_admin_delete_user', { p_user: u.id }, `🗑️ @${u.username} deleted`);
+          }
+        },
+      }, 'Delete'))));
+}
+
+async function adminAnswerRows(search) {
+  const { answers } = await rpc('hive_admin_answers', { p_search: search });
+  if (!answers.length) return [el('p', { class: 'empty' }, 'No answers found.')];
+  return answers.map(a => {
+    const row = el('div', { class: 'admin-row' });
+    const edit = () => row.replaceChildren(teachBox({
+      prompt: a.prompt,
+      initial: a.text,
+      title: `✏️ Edit the answer for “${a.prompt}”`,
+      submitLabel: 'Save',
+      onSubmit: async text => {
+        const res = await rpc('hive_admin_edit_answer', { p_answer_id: a.id, p_answer: text });
+        Object.assign(a, res.answer);
+        show();
+        toast('✏️ Answer updated');
+      },
+      onCancel: () => show(),
+    }));
+    const remove = async () => {
+      if (!confirm(`Delete the answer for “${a.prompt}”? It can't be undone.`)) return;
+      try {
+        await rpc('hive_admin_delete_answer', { p_answer_id: a.id });
+        row.remove();
+        toast('🗑️ Answer deleted');
+      } catch (err) {
+        toast(err.message, 'error');
+      }
+    };
+    const show = () => row.replaceChildren(
+      el('div', { class: 'row-main' },
+        el('span', { class: 'row-title' }, `“${a.prompt}”`),
+        el('span', { class: 'admin-answer' }, richText(a.text)),
+        el('span', { class: 'row-sub' }, `${a.bot === 'public' ? '🌐 Public' : '👥 Friends'} · by @${a.author || '?'} · used ${a.uses}× · 👍 ${a.up} 👎 ${a.down}`)),
+      el('div', { class: 'admin-btns' },
+        el('button', { class: 'btn small', type: 'button', onclick: edit }, 'Edit'),
+        el('button', { class: 'btn small danger', type: 'button', onclick: remove }, 'Delete')));
+    show();
+    return row;
+  });
 }
 
 // ---------- start ----------

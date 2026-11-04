@@ -82,7 +82,7 @@
           <div class="messages" data-bot="friend" aria-live="polite" hidden></div>
         </div>
         <form class="composer" id="composer">
-          <input id="prompt" maxlength="300" autocomplete="off" placeholder="Ask the bot anything…">
+          <input id="prompt" maxlength="300" autocomplete="off" spellcheck="true" placeholder="Ask the bot anything…">
           <button class="btn primary" type="submit" id="send-btn">Send ➤</button>
         </form>
         <p class="hint">Fun commands: <code>/roll 2d6</code> <code>/flip</code> <code>/8ball</code> <code>/joke</code> <code>/stats</code></p>
@@ -92,9 +92,10 @@
         <nav class="side-tabs">
           <button data-side="bounties" class="active" type="button">🎯<span>Bounties</span></button>
           <button data-side="ranks" type="button">🏆<span>Ranks</span></button>
-          <button data-side="friends" type="button">👥<span>Friends</span></button>
+          <button data-side="friends" type="button">👥<span>Friends</span><b class="tab-badge" id="friend-badge" hidden></b></button>
           <button data-side="badges" type="button">🏅<span>Badges</span></button>
           <button data-side="style" type="button">🎨<span>Style</span></button>
+          <button data-side="admin" type="button" id="admin-tab" hidden>🛡️<span>Admin</span></button>
         </nav>
         <div class="side-body" id="side-body"></div>
       </aside>

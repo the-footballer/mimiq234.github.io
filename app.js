@@ -483,7 +483,7 @@ async function send(rawText) {
     const [res] = await Promise.all([rpc('hive_ask', { p_bot: bot, p_prompt: text }), sleep(400 + Math.random() * 400)]);
     typing.remove();
     if (res.type === 'answer') {
-      addAnswerMsg(bot, res.answer, res.corrected ? { note: `🔤 Looks like a typo, so I answered “${res.corrected}”` } : {});
+      addAnswerMsg(bot, res.answer, res.corrected ? { note: `🔤 Looks like a typo, so I answered “${res.corrected}”`, typed: text } : {});
       sfx('receive');
     } else if (res.type === 'unknown') {
       addUnknownMsg(bot, res.prompt, res);
@@ -522,6 +522,7 @@ function addAnswerMsg(bot, answer, opts = {}) {
   node.dataset.answerId = answer.id;
   node._answer = answer;
   node._note = opts.note;
+  node._typed = opts.typed; // set when this answer was a typo guess
   renderAnswer(node);
   scrollDown(bot);
   return node;
@@ -536,7 +537,13 @@ function renderAnswer(node) {
   ];
   if (a.editor) meta.push(el('span', {}, '✏️ edited by ', userTag(a.editor)));
   bubble.replaceChildren(...[
-    node._note ? el('p', { class: 'note' }, node._note) : null,
+    node._note ? el('p', { class: 'note' }, node._note, node._typed ? el('button', {
+      class: 'chip wrong-guess', type: 'button',
+      onclick: e => {
+        e.currentTarget.remove();
+        addUnknownMsg(a.bot, node._typed, { intro: `Oops! 😅 How should I reply to “${node._typed}”?` });
+      },
+    }, 'Not what I meant') : null) : null,
     el('div', { class: 'answer-text' }, richText(a.text)),
     el('div', { class: 'answer-meta' },
       meta,
@@ -674,16 +681,42 @@ function tipBanner(prompt, textarea) {
   return tip;
 }
 
-function teachBox({ prompt, initial = '', title, note, bounty, submitLabel, cancelLabel = 'Cancel', onSubmit, onCancel }) {
+const MAX_EXTRA_PROMPTS = 5;
+
+// extraPrompts: show "＋ Add another way to ask" so one answer covers several questions.
+function teachBox({ prompt, initial = '', title, note, bounty, extraPrompts = false, submitLabel, cancelLabel = 'Cancel', onSubmit, onCancel }) {
   const textarea = el('textarea', { maxlength: 1000, placeholder: 'Type how the bot should reply…', rows: 3, spellcheck: 'true' });
   textarea.value = initial;
   const error = el('div', { class: 'teach-error', role: 'alert' });
   const submit = el('button', { class: 'btn primary small', type: 'submit' }, submitLabel);
+
+  const extras = el('div', { class: 'extra-prompts' });
+  const extraInputs = () => $$('input', extras);
+  const addButton = el('button', { class: 'btn small ghost', type: 'button', onclick: () => addExtra() }, '＋ Add another way to ask');
+  const addExtra = () => {
+    if (extraInputs().length >= MAX_EXTRA_PROMPTS) return;
+    const input = el('input', { maxlength: 300, placeholder: 'Another way to ask it, like "hello"', spellcheck: 'true', 'aria-label': 'Another way to ask' });
+    const row = el('div', { class: 'extra-row' }, input, el('button', {
+      class: 'icon-btn small', type: 'button', title: 'Remove',
+      onclick: () => {
+        row.remove();
+        addButton.hidden = false;
+      },
+    }, '✕'));
+    extras.append(row);
+    addButton.hidden = extraInputs().length >= MAX_EXTRA_PROMPTS;
+    input.focus();
+  };
+
   const form = el('form', { class: 'teach' },
     tipBanner(prompt, textarea),
     title ? el('p', { class: 'unknown-title' }, title) : null,
     bounty ? el('span', { class: 'bounty-tag' }, '🎯 BOUNTY · 2× XP') : null,
     textarea,
+    extraPrompts ? el('div', { class: 'extra-wrap' },
+      el('div', { class: 'teach-note' }, `Other ways people might ask “${prompt}” get the same answer:`),
+      extras,
+      addButton) : null,
     note ? el('div', { class: 'teach-note' }, note) : null,
     error,
     el('div', { class: 'teach-row' },
@@ -700,7 +733,7 @@ function teachBox({ prompt, initial = '', title, note, bounty, submitLabel, canc
     submit.disabled = true;
     error.textContent = '';
     try {
-      await onSubmit(text);
+      await onSubmit(text, extraInputs().map(i => i.value.trim()).filter(Boolean));
     } catch (err) {
       error.textContent = err.message;
       sfx('error');
@@ -725,13 +758,19 @@ function addUnknownMsg(bot, prompt, { suggestions = [], bounty = false, intro } 
     teachBox({
       prompt,
       bounty,
+      extraPrompts: true,
       submitLabel: 'Teach the bot',
       cancelLabel: 'Skip',
-      onSubmit: async text => {
+      onSubmit: async (text, also) => {
         try {
-          const res = await rpc('hive_teach', { p_bot: bot, p_prompt: prompt, p_answer: text });
-          bubble.replaceChildren(el('p', {}, `✅ Learned! Next time someone asks “${prompt}”, I’ll say that.`));
-          changeCount(bot, 1);
+          const res = await rpc('hive_teach', { p_bot: bot, p_prompt: prompt, p_answer: text, p_also: also });
+          const quoted = list => list.map(p => `“${p}”`).join(', ');
+          bubble.replaceChildren(...[
+            el('p', {}, `✅ Learned! Next time someone asks “${prompt}”, I’ll say that.`),
+            res.also.length ? el('p', { class: 'muted' }, `➕ Same answer for: ${quoted(res.also)}`) : null,
+            res.skipped.length ? el('p', { class: 'muted' }, `⏭️ Already taught, so I kept the old answer for: ${quoted(res.skipped)}`) : null,
+          ].filter(Boolean));
+          changeCount(bot, 1 + res.also.length);
           sfx('learn');
           showEvents(res.events);
           if (state.side === 'bounties') renderSide();
